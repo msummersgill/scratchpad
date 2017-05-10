@@ -91,7 +91,7 @@ ComplexityOrder <- c("plotly:::group2NA(Data, \"GroupA\", retrace.first = TRUE)"
 
 MetricsDT[,seconds := time/1e8]
 MetricsDT[,expr := ordered(expr, levels = ComplexityOrder)]
-MetricsDT[,Sorted := as.factor(ifelse(!grepl("B\",\\s+retrace", expr),"Sorted","Not Sorted"))]
+MetricsDT[,Sorted := as.factor(ifelse(!grepl("(A|B)\",\\s+retrace", expr),"Sorted","Not Sorted"))]
 
 ```
 
