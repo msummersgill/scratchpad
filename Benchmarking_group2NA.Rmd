@@ -1,0 +1,159 @@
+---
+title: "R Notebook"
+author: "Matt Summersgill"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: html_notebook
+---
+
+## Setup
+
+```{r setup, results = "hide"}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE)
+## Installing dev versions of plotly with new data.table group2NA()
+
+library(devtools)
+library(withr)
+library(ggplot2,lib.loc = "/home/Matthew14786/dev/")
+# withr::with_libpaths(new = "/home/Matthew14786/dev/",
+#                      install_local("/home/Matthew14786/plotly/",repos = NULL,subdir = NULL, force = TRUE))
+withr::with_libpaths(new = "/home/Matthew14786/dev/",
+                     install_github("msummersgill/plotly",ref = "data.table", force = TRUE))
+library(plotly,lib.loc = "/home/Matthew14786/dev/")
+library(data.table)
+library(stringi)
+library(microbenchmark)
+
+## Function to generate sample data
+
+exampleData <- function(RowCount = 10,
+                        nGroupsA = 3,
+                        nGroupsB = 3,
+                        nGroupsC = 3,
+                        nIntCols = 3){
+  set.seed(1)
+  data.frame(
+    GroupA = replicate(1,sample(stri_rand_strings(nGroupsA,5),RowCount,rep=TRUE)),
+    GroupB = replicate(1,sample(stri_rand_strings(nGroupsB,5),RowCount,rep=TRUE)),
+    GroupC = replicate(1,sample(stri_rand_strings(nGroupsC,5),RowCount,rep=TRUE)),
+    replicate(nIntCols,sample(0:1e9,RowCount,rep=TRUE))
+  )
+}
+
+```
+
+## Benchmark Steps
+
+```r
+
+Metrics <- NULL
+ptm <- proc.time()
+
+RowPowerStart <- 2
+GroupPowerStart <-1
+
+for (nRows in RowPowerStart:7){
+  for (nGroups in 1:6){
+    if(nRows > nGroups){
+      print(cat(paste0("Starting 1e", nRows," rows with \t1e", nGroups, " groups\n")))
+      Data <- exampleData(RowCount = 1*10^nRows, nGroupsA = 1*10^nGroups, nGroupsB = 1*10^nGroups, nGroupsC = 1*10^nGroups, nIntCols = 3)
+      New <- microbenchmark(
+        plotly:::group2NA(Data,"GroupA", retrace.first = TRUE),
+        plotly:::group2NA(Data,"GroupA", "GroupB",retrace.first = TRUE),
+        plotly:::group2NA(Data,"GroupA", "GroupB","GroupC",retrace.first = TRUE),
+        plotly:::group2NA(Data,"GroupA", "GroupB","X1",retrace.first = TRUE),
+        plotly:::group2NA(Data,"GroupA", "GroupB",c("X1","X2"),retrace.first = TRUE),
+        plotly:::group2NA(Data,"GroupA", "GroupB",c("X1","X2","X3"),retrace.first = TRUE),
+        times = 5,
+        unit = "s"
+      )
+      New$expr <- as.character(New$expr)
+      New$NumberRows <- 1*10^nRows
+      New$NumberGroups <- 1*10^nGroups
+      Metrics <- rbind(Metrics,New)
+      rm(Data)
+      gc()
+    }
+  }
+}
+
+TotalTime <- proc.time() - ptm
+
+MetricsDT <- copy(Metrics)
+setDT(MetricsDT)
+
+ComplexityOrder <- c("plotly:::group2NA(Data, \"GroupA\", retrace.first = TRUE)",
+                     "plotly:::group2NA(Data, \"GroupA\", \"GroupB\", retrace.first = TRUE)",
+                     "plotly:::group2NA(Data, \"GroupA\", \"GroupB\", \"GroupC\", retrace.first = TRUE)",
+                     "plotly:::group2NA(Data, \"GroupA\", \"GroupB\", \"X1\", retrace.first = TRUE)",
+                     "plotly:::group2NA(Data, \"GroupA\", \"GroupB\", c(\"X1\", \"X2\"), retrace.first = TRUE)",
+                     "plotly:::group2NA(Data, \"GroupA\", \"GroupB\", c(\"X1\", \"X2\", \"X3\"),      retrace.first = TRUE)")
+
+MetricsDT[,seconds := time/1e8]
+MetricsDT[,expr := ordered(expr, levels = ComplexityOrder)]
+MetricsDT[,Sorted := as.factor(ifelse(!grepl("B\",\\s+retrace", expr),"Sorted","Not Sorted"))]
+
+```
+
+## Results
+
+```{r fig.width= 10, fig.height= 8}
+MetricsDT %>%
+  plot_ly %>% 
+  add_trace(x = ~jitter(as.integer(as.factor(NumberRows))+RowPowerStart-1),
+            y = ~jitter(as.integer(as.factor(NumberGroups))+GroupPowerStart-1),
+            z = ~seconds,
+            color = ~expr,
+            text = ~paste0("Runtime: ", round(seconds,4),"<br>",
+                           expr,"<br>",
+                           NumberRows, " rows<br>",
+                           NumberGroups, " groups<br>"),
+            hoverinfo = "text",
+            type = "scatter3d",
+            mode = "markers",
+            marker = list(size = 4,
+                          opacity = 0.6)) %>%
+  layout(scene = list(
+    xaxis = list(
+      showgrid = TRUE,
+      showspikes = FALSE,
+      gridcolor = "rgba(255,255,255,1)",
+      showbackground = TRUE,
+      backgroundcolor = 'rgba(235,235,235,1)',
+      gridwith = 2,
+      title = "# Rows",
+      tickprefix = "1e+0",
+      tickangle = 0,
+      tickfont = list(size = 12)
+    ),
+    yaxis = list(
+      showgrid = TRUE,
+      showspikes = FALSE,
+      showbackground = TRUE,
+      backgroundcolor = 'rgba(235,235,235,1)',
+      gridcolor = "rgba(255,255,255,1)",
+      gridwith = 2,
+      title = "# Groups",
+      tickprefix = "1e+0"
+    ),
+    zaxis = list(
+      showgrid = TRUE,
+      showspikes = FALSE,
+      showbackground = TRUE,
+      backgroundcolor = 'rgba(235,235,235,1)',
+      gridcolor = "rgba(255,255,255,1)",
+      gridwith = 2,
+      title = "Time",
+      ticksuffix = "s"
+    )),
+    paper_bgcolor = 'rgba(235,235,235,0)',
+    plot_bgcolor = 'rgba(235,235,235,0)') 
+```
+
+## Session Info
+
+```{r}
+Sys.time()
+devtools::session_info()
+```
+
